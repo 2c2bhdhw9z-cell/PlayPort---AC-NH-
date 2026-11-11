@@ -6,10 +6,13 @@
 #     libclang_rt.builtins-aarch64.a as libgcc*.a (docs/BUILDING.md, "llvm-mingw");
 #   - SPIRV-LLVM-Translator for LLVM 22, which Mesa's host shader tools link
 #     (docs/BUILDING.md, "KosmicKrisp"; Ubuntu and apt.llvm.org do not package it);
+#   - libplist, libimobiledevice-glue, libusbmuxd, libtatsu and libimobiledevice
+#     at the versions xtool 1.20.1's Dockerfile builds, which xtool links
+#     (Ubuntu 24.04 has libimobiledevice 1.3.0 and no glue library);
 #   - Playport's own ld64, patched xtool and Rust under $PLAYPORT_BUILD/inputs
 #     (build/toolchain/*.sh, which stage_inputs would otherwise run on demand).
 set -euo pipefail
-: "${PLAYPORT_BUILD:?}" "${LLVM_MINGW:?}" "${SPIRV_PREFIX:?}"
+: "${PLAYPORT_BUILD:?}" "${LLVM_MINGW:?}" "${SPIRV_PREFIX:?}" "${LIMD_PREFIX:?}"
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 export JOBS=${JOBS:-$(nproc)}
 work=$(mktemp -d "${RUNNER_TEMP:-/tmp}/toolchain.XXXXXX")
@@ -70,6 +73,34 @@ if [ ! -f "$SPIRV_PREFIX/lib/pkgconfig/LLVMSPIRVLib.pc" ]; then
     echo "::endgroup::"
 fi
 
+if [ ! -f "$LIMD_PREFIX/lib/pkgconfig/libimobiledevice-1.0.pc" ]; then
+    echo "::group::libimobiledevice and its libraries (xtool's Dockerfile versions)"
+    own "$LIMD_PREFIX"
+    export PKG_CONFIG_PATH="$LIMD_PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+    # name, ref, configure flags. libimobiledevice is the master commit xtool
+    # 1.20.1's Dockerfile built against (its newest when 1.20.1 was released).
+    for row in "libplist 2.6.0 --without-cython" \
+               "libimobiledevice-glue 1.3.1" \
+               "libusbmuxd 2.1.0" \
+               "libtatsu 1.0.4" \
+               "libimobiledevice fa0f79190142bc309307967c058f89c1b36eb6b8 --without-cython"; do
+        read -r name ref flags <<<"$row"
+        # Full clones: their autogen.sh derives the version from git describe.
+        git clone -q "https://github.com/libimobiledevice/$name.git" "$work/$name"
+        git -C "$work/$name" -c advice.detachedHead=false checkout -q "$ref"
+        (
+            cd "$work/$name"
+            # shellcheck disable=SC2086
+            ./autogen.sh --prefix="$LIMD_PREFIX" $flags >/dev/null
+            make -j"$JOBS" >/dev/null
+            make install >/dev/null
+        )
+    done
+    sudo ldconfig
+    pkg-config --modversion libplist-2.0 libimobiledevice-glue-1.0 libusbmuxd-2.0 libimobiledevice-1.0
+    echo "::endgroup::"
+fi
+
 cd "$REPO"
 inputs=$PLAYPORT_BUILD/inputs
 if [ ! -x "$inputs/apple-linker/prefix/bin/arm64-apple-darwin-ld" ]; then
@@ -93,4 +124,4 @@ if ! RUSTUP_HOME=$inputs/rust/rustup "$inputs/rust/cargo/bin/rustc" --version 2>
     echo "::endgroup::"
 fi
 
-du -sh "$LLVM_MINGW" "$SPIRV_PREFIX" "$inputs"/* 2>/dev/null || true
+du -sh "$LLVM_MINGW" "$SPIRV_PREFIX" "$LIMD_PREFIX" "$inputs"/* 2>/dev/null || true

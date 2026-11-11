@@ -8,8 +8,8 @@
 #     list: m4 and pkg-config (Madeira's GMP/nettle/gnutls), Mesa's host
 #     dependencies (meson >= 1.4, mako, PyYAML, packaging, SPIRV-Tools, libclc,
 #     zlib, expat), glslang for DXVK and vkd3d-proton, Swift's usual packages,
-#     and the libraries xtool's packages link (liblzma, libimobiledevice and
-#     its glue, libusbmuxd, libplist);
+#     liblzma for xtool's unxip dependency, and autotools for the
+#     libimobiledevice stack toolchain.sh builds (Ubuntu 24.04's is too old);
 #   - /usr/lib/swift, where stage_inputs copies Swift's clang resource headers
 #     from (the runner image installs Swift under /usr/share/swift).
 # The build area is $PLAYPORT_BUILD (the workflow sets it, on the runner's
@@ -46,7 +46,7 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommen
     glslang-tools spirv-tools zlib1g-dev libexpat1-dev libdrm-dev libzstd-dev \
     uuid-dev libbsd-dev libssl-dev libcurl4-openssl-dev libxml2-dev libsqlite3-dev \
     libncurses-dev libz3-dev libedit-dev libpython3-dev liblzma-dev \
-    libimobiledevice-dev libimobiledevice-glue-dev libusbmuxd-dev libplist-dev >/dev/null
+    autoconf automake libtool-bin >/dev/null
 command -v 7za >/dev/null || sudo ln -sf "$(command -v 7z)" /usr/local/bin/7za
 endgroup
 
@@ -92,6 +92,8 @@ endgroup
 group "pkg-config paths"
 clc=$(dirname "$(find /usr/lib /usr/share -name libclc.pc -print -quit 2>/dev/null)")
 [ -n "$clc" ] && [ "$clc" != . ] || { echo "::error::libclc.pc not found"; exit 1; }
-echo "PKG_CONFIG_PATH=${SPIRV_PREFIX:?}/lib/pkgconfig:$clc" >> "$GITHUB_ENV"
+echo "PKG_CONFIG_PATH=${SPIRV_PREFIX:?}/lib/pkgconfig:${LIMD_PREFIX:?}/lib/pkgconfig:$clc" >> "$GITHUB_ENV"
+# The libimobiledevice stack's shared libraries, for xtool (filled by toolchain.sh or the cache).
+echo "$LIMD_PREFIX/lib" | sudo tee /etc/ld.so.conf.d/limd.conf >/dev/null
 echo "libclc: $clc"
 endgroup

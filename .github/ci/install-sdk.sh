@@ -9,6 +9,8 @@ set -euo pipefail
 TARBALL=${1:?usage: install-sdk.sh darwin.xtoolsdk.tar.zst}
 : "${PLAYPORT_BUILD:?}"
 XTOOL=$PLAYPORT_BUILD/inputs/xtool-src/.build/release/xtool
+# xtool's libimobiledevice stack came back with the toolchain cache.
+sudo ldconfig
 work=$(mktemp -d "${RUNNER_TEMP:-/tmp}/sdk.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 

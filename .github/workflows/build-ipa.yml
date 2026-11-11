@@ -31,6 +31,7 @@ env:
   PLAYPORT_BUILD: /mnt/pp
   LLVM_MINGW: /opt/llvm-mingw
   SPIRV_PREFIX: /opt/spirv-llvm-translator
+  LIMD_PREFIX: /opt/limd
 
 jobs:
   toolchain:
@@ -52,12 +53,13 @@ jobs:
           path: |
             /opt/llvm-mingw
             /opt/spirv-llvm-translator
+            /opt/limd
             /mnt/pp/inputs
       - name: Directories the caches restore into
         if: steps.cached.outputs.cache-hit != 'true'
         run: |
-          sudo mkdir -p "$LLVM_MINGW" "$SPIRV_PREFIX" "$PLAYPORT_BUILD"
-          sudo chown "$(id -u):$(id -g)" "$LLVM_MINGW" "$SPIRV_PREFIX" "$PLAYPORT_BUILD"
+          sudo mkdir -p "$LLVM_MINGW" "$SPIRV_PREFIX" "$LIMD_PREFIX" "$PLAYPORT_BUILD"
+          sudo chown "$(id -u):$(id -g)" "$LLVM_MINGW" "$SPIRV_PREFIX" "$LIMD_PREFIX" "$PLAYPORT_BUILD"
       # A failed run keeps what it finished (toolchain.sh skips each finished part).
       - name: Restore a failed run's finished toolchains
         if: steps.cached.outputs.cache-hit != 'true'
@@ -68,6 +70,7 @@ jobs:
           path: |
             /opt/llvm-mingw
             /opt/spirv-llvm-translator
+            /opt/limd
             /mnt/pp/inputs
       - name: Host tools
         if: steps.cached.outputs.cache-hit != 'true'
@@ -82,6 +85,7 @@ jobs:
           path: |
             /opt/llvm-mingw
             /opt/spirv-llvm-translator
+            /opt/limd
             /mnt/pp/inputs
       - name: Keep the finished toolchains for the next run
         if: failure() && steps.cached.outputs.cache-hit != 'true'
@@ -91,6 +95,7 @@ jobs:
           path: |
             /opt/llvm-mingw
             /opt/spirv-llvm-translator
+            /opt/limd
             /mnt/pp/inputs
 
   sdk:
@@ -126,8 +131,8 @@ jobs:
           persist-credentials: false
       - name: Directories the caches restore into
         run: |
-          sudo mkdir -p "$LLVM_MINGW" "$SPIRV_PREFIX" "$PLAYPORT_BUILD"
-          sudo chown "$(id -u):$(id -g)" "$LLVM_MINGW" "$SPIRV_PREFIX" "$PLAYPORT_BUILD"
+          sudo mkdir -p "$LLVM_MINGW" "$SPIRV_PREFIX" "$LIMD_PREFIX" "$PLAYPORT_BUILD"
+          sudo chown "$(id -u):$(id -g)" "$LLVM_MINGW" "$SPIRV_PREFIX" "$LIMD_PREFIX" "$PLAYPORT_BUILD"
       - name: Host tools
         run: .github/ci/host-setup.sh
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -137,6 +142,7 @@ jobs:
           path: |
             /opt/llvm-mingw
             /opt/spirv-llvm-translator
+            /opt/limd
             /mnt/pp/inputs
       - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
