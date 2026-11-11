@@ -70,9 +70,11 @@ llvm-config --version
 endgroup
 
 group "meson $MESON"
-pipx install --quiet "meson==$MESON"
-echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-"$HOME/.local/bin/meson" --version
+# The runner image points pipx at its own bin directory (PIPX_BIN_DIR=/opt/pipx_bin).
+pipx install --quiet --force "meson==$MESON"
+bindir=${PIPX_BIN_DIR:-$HOME/.local/bin}
+echo "$bindir" >> "$GITHUB_PATH"
+"$bindir/meson" --version
 endgroup
 
 group "Swift"
