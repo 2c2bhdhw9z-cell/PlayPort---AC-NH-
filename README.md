@@ -1,3 +1,11 @@
+> [!NOTE]
+> **This repository is a fork of [Playport](https://github.com/playportdev/playport) for
+> Assetto Corsa and No Hesi.** Work in progress. The `assetto-corsa` branch builds
+> Playport's IPA on GitHub Actions ([`build-ipa`](.github/workflows/build-ipa.yml)):
+> a macOS job packages Apple's SDK from the runner's Xcode, and Linux jobs build the
+> rest. Assetto Corsa support (starting `acs.exe` without the Kunos launcher, loading
+> Custom Shaders Patch) comes next. Playport's own README follows, unchanged.
+
 <div align="center">
 
 <img src="site/logo.svg" width="128" alt="Playport">
