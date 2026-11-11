@@ -53,6 +53,22 @@ jobs:
             /opt/llvm-mingw
             /opt/spirv-llvm-translator
             /mnt/pp/inputs
+      - name: Directories the caches restore into
+        if: steps.cached.outputs.cache-hit != 'true'
+        run: |
+          sudo mkdir -p "$LLVM_MINGW" "$SPIRV_PREFIX" "$PLAYPORT_BUILD"
+          sudo chown "$(id -u):$(id -g)" "$LLVM_MINGW" "$SPIRV_PREFIX" "$PLAYPORT_BUILD"
+      # A failed run keeps what it finished (toolchain.sh skips each finished part).
+      - name: Restore a failed run's finished toolchains
+        if: steps.cached.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.key.outputs.key }}-partial-${{ github.run_id }}
+          restore-keys: ${{ steps.key.outputs.key }}-partial-
+          path: |
+            /opt/llvm-mingw
+            /opt/spirv-llvm-translator
+            /mnt/pp/inputs
       - name: Host tools
         if: steps.cached.outputs.cache-hit != 'true'
         run: .github/ci/host-setup.sh
@@ -63,6 +79,15 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           key: ${{ steps.key.outputs.key }}
+          path: |
+            /opt/llvm-mingw
+            /opt/spirv-llvm-translator
+            /mnt/pp/inputs
+      - name: Keep the finished toolchains for the next run
+        if: failure() && steps.cached.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.key.outputs.key }}-partial-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             /opt/llvm-mingw
             /opt/spirv-llvm-translator
