@@ -7,7 +7,8 @@
 #   - every host tool stage_inputs checks, plus what the stages use beyond that
 #     list: m4 and pkg-config (Madeira's GMP/nettle/gnutls), Mesa's host
 #     dependencies (meson >= 1.4, mako, PyYAML, packaging, SPIRV-Tools, libclc,
-#     zlib, expat), glslang for DXVK and vkd3d-proton, Swift's usual packages;
+#     zlib, expat), glslang for DXVK and vkd3d-proton, Swift's usual packages,
+#     and liblzma for xtool's unxip dependency;
 #   - /usr/lib/swift, where stage_inputs copies Swift's clang resource headers
 #     from (the runner image installs Swift under /usr/share/swift).
 # The build area is $PLAYPORT_BUILD (the workflow sets it, on the runner's
@@ -43,7 +44,7 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommen
     xxd openssl patch git rsync p7zip-full curl ca-certificates gnupg unzip xz-utils zstd file \
     glslang-tools spirv-tools zlib1g-dev libexpat1-dev libdrm-dev libzstd-dev \
     uuid-dev libbsd-dev libssl-dev libcurl4-openssl-dev libxml2-dev libsqlite3-dev \
-    libncurses-dev libz3-dev libedit-dev libpython3-dev >/dev/null
+    libncurses-dev libz3-dev libedit-dev libpython3-dev liblzma-dev >/dev/null
 command -v 7za >/dev/null || sudo ln -sf "$(command -v 7z)" /usr/local/bin/7za
 endgroup
 
