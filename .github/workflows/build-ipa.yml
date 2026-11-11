@@ -1,0 +1,178 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Build Playport's release IPA on GitHub-hosted runners. The IPA is ad hoc
+# signed, like Playport's own releases, and a sideloader re-signs it.
+#
+#   toolchain   ubuntu-24.04  host toolchains (.github/ci/toolchain.sh), cached by their inputs
+#   sdk         macos-26      Apple's iOS and macOS SDKs from the runner's Xcode 26.6,
+#                             as xtool's darwin.xtoolsdk (.github/ci/darwin-sdk.sh)
+#   build       ubuntu-24.04  ./pp build --variant release --unsigned, then the IPA as an artifact
+#   forget-sdk  ubuntu-24.04  deletes the SDK's cache entry, whatever happened before
+#
+# Apple's SDK is not redistributable, so it never becomes an artifact of this
+# public repository. It goes from the sdk job to the build job through an
+# Actions cache entry of this run, which only this repository's workflows can
+# read. The build job deletes the entry as soon as it has restored it, and the
+# sdk job waits for the toolchain job so that the entry exists for minutes only.
+name: build-ipa
+
+on:
+  push:
+    branches: [assetto-corsa]
+    paths-ignore: ['**.md', 'site/**', 'docs/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PLAYPORT_BUILD: /mnt/pp
+  LLVM_MINGW: /opt/llvm-mingw
+  SPIRV_PREFIX: /opt/spirv-llvm-translator
+
+jobs:
+  toolchain:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    outputs:
+      key: ${{ steps.key.outputs.key }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: key
+        run: echo "key=toolchain-v1-${{ hashFiles('pins.lock', 'build/toolchain/**', '.github/ci/toolchain.sh') }}" >> "$GITHUB_OUTPUT"
+      - id: cached
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.key.outputs.key }}
+          lookup-only: true
+          path: |
+            /opt/llvm-mingw
+            /opt/spirv-llvm-translator
+            /mnt/pp/inputs
+      - name: Host tools
+        if: steps.cached.outputs.cache-hit != 'true'
+        run: .github/ci/host-setup.sh
+      - name: Toolchains
+        if: steps.cached.outputs.cache-hit != 'true'
+        run: .github/ci/toolchain.sh
+      - if: steps.cached.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.key.outputs.key }}
+          path: |
+            /opt/llvm-mingw
+            /opt/spirv-llvm-translator
+            /mnt/pp/inputs
+
+  sdk:
+    needs: toolchain
+    runs-on: macos-26
+    timeout-minutes: 45
+    outputs:
+      key: ${{ steps.key.outputs.key }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: key
+        run: echo "key=darwin-sdk-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
+      - name: Package the SDKs with xtool 1.20.1
+        run: .github/ci/darwin-sdk.sh sdk-cache
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.key.outputs.key }}
+          path: sdk-cache
+          enableCrossOsArchive: true
+
+  build:
+    needs: [toolchain, sdk]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      contents: read
+      actions: write # gh cache delete, for the SDK's entry
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Directories the caches restore into
+        run: |
+          sudo mkdir -p "$LLVM_MINGW" "$SPIRV_PREFIX" "$PLAYPORT_BUILD"
+          sudo chown "$(id -u):$(id -g)" "$LLVM_MINGW" "$SPIRV_PREFIX" "$PLAYPORT_BUILD"
+      - name: Host tools
+        run: .github/ci/host-setup.sh
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ needs.toolchain.outputs.key }}
+          fail-on-cache-miss: true
+          path: |
+            /opt/llvm-mingw
+            /opt/spirv-llvm-translator
+            /mnt/pp/inputs
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ needs.sdk.outputs.key }}
+          path: sdk-cache
+          enableCrossOsArchive: true
+          fail-on-cache-miss: true
+      - name: Delete the SDK's cache entry
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEY: ${{ needs.sdk.outputs.key }}
+        run: gh cache delete "$KEY" --repo "$GITHUB_REPOSITORY" || true
+      - name: Install the Darwin SDK
+        run: .github/ci/install-sdk.sh sdk-cache/darwin.xtoolsdk.tar.zst
+      - name: Restore the build cache (LLVM 15 builds, source mirrors)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: pp-cache-v1-${{ hashFiles('pins.lock') }}-${{ github.run_id }}
+          restore-keys: pp-cache-v1-${{ hashFiles('pins.lock') }}-
+          path: /mnt/pp/cache
+      - name: pp build --variant release --unsigned
+        # Stops short of the job's limit so that the cache below is still saved.
+        run: timeout --kill-after=2m 320m ./pp build --variant release --unsigned
+      - name: Save the build cache
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: pp-cache-v1-${{ hashFiles('pins.lock') }}-${{ github.run_id }}
+          path: /mnt/pp/cache
+      - name: Upload the IPA
+        if: success()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Playport-AC-${{ github.sha }}
+          path: |
+            /mnt/pp/out/*/*.ipa
+            /mnt/pp/out/*/SHA256SUMS
+            /mnt/pp/out/*/provenance.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+      - name: Upload the stage logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: build-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /mnt/pp/run/logs
+          if-no-files-found: ignore
+          retention-days: 7
+
+  forget-sdk:
+    needs: [sdk, build]
+    if: always() && needs.sdk.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          KEY: ${{ needs.sdk.outputs.key }}
+        run: gh cache delete "$KEY" --repo "$GITHUB_REPOSITORY" || true
