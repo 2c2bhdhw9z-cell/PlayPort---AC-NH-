@@ -158,10 +158,6 @@ jobs:
         run: gh cache delete "$KEY" --repo "$GITHUB_REPOSITORY" || true
       - name: Install the Darwin SDK
         run: .github/ci/install-sdk.sh sdk-cache/darwin.xtoolsdk.tar.zst
-      # A Swift error in the app fails here in minutes, not after the native build's hours.
-      - name: Compile the app's Swift for iOS
-        timeout-minutes: 45
-        run: .github/ci/typecheck-app.sh
       - name: Restore the build cache (LLVM 15 builds, source mirrors)
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
