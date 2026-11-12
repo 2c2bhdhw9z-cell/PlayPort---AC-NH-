@@ -94,23 +94,31 @@ final class AssettoCorsaStore: ObservableObject {
             Self.log("\(url.lastPathComponent) refused: \(e)")
             return tell("Can't install \(url.lastPathComponent)", (e as? AssettoCorsaMods.Refusal)?.description ?? "\(e)")
         }
-        let left = plan.skipped > 0 ? " \(plan.skipped) file\(plan.skipped == 1 ? "" : "s") outside it (readmes, pictures) stay out." : ""
-        PadModal.shared.picker(
-            title: "Install \(url.lastPathComponent)?", context: "Assetto Corsa",
-            note: "\(plan.summary): \(plan.files.count) file\(plan.files.count == 1 ? "" : "s"), \(ByteCount.format(plan.totalBytes)), "
-                + "into the game's folder. A file already there with the same name is replaced.\(left) Keep Playport open until it is done.",
-            options: [PadOption(id: "install", label: "Install"), PadOption(id: "cancel", label: "Cancel")],
-            selected: nil) { choice in
+        let name: String = url.lastPathComponent
+        let files: String = Self.count(plan.files.count, "file")
+        var note: String = plan.summary + ": " + files + ", " + ByteCount.format(plan.totalBytes) + ", into the game's folder. "
+        note += "A file already there with the same name is replaced. "
+        if plan.skipped > 0 { note += Self.count(plan.skipped, "file") + " outside it (readmes, pictures) stay out. " }
+        note += "Keep Playport open until it is done."
+        let options: [PadOption] = [PadOption(id: "install", label: "Install"), PadOption(id: "cancel", label: "Cancel")]
+        let choose: (String) -> Void = { choice in
             guard choice == "install" else { return }
             self.install(plan, from: source, url: url, into: root)
         }
+        PadModal.shared.picker(title: "Install " + name + "?", context: "Assetto Corsa", note: note, options: options,
+                               selected: nil, choose: choose)
+    }
+
+    /// `1 file`, `3 files`.
+    nonisolated static func count(_ n: Int, _ noun: String) -> String {
+        String(n) + " " + noun + (n == 1 ? "" : "s")
     }
 
     private func install(_ plan: AssettoCorsaMods.Plan, from source: ImportSource, url: URL, into root: URL) {
         guard installing == nil else { return }
         installing = (plan.summary, 0)
-        Self.log("installing \(url.lastPathComponent): \(plan.summary), \(plan.files.count) files, \(plan.totalBytes) bytes, "
-                 + "\(plan.skipped) left out")
+        let line: String = "installing \(url.lastPathComponent): \(plan.summary), \(plan.files.count) files, "
+        Self.log(line + "\(plan.totalBytes) bytes, \(plan.skipped) left out")
         let started = Date()
         Task {
             let failure = await Task.detached(priority: .userInitiated) { () -> String? in
@@ -178,14 +186,18 @@ final class AssettoCorsaStore: ObservableObject {
             }
             do {
                 let (info, ip) = try await AssettoCorsaServer.info(address)
-                Self.log("server \(address.text) (\(ip)): \(info.name), track \(info.track), \(info.cars.count) car(s), TCP \(info.tcpPort)"
-                         + (info.clients.map { ", \($0) of \(info.capacity ?? 0) drivers" } ?? ""))
+                var line: String = "server \(address.text) (\(ip)): \(info.name), track \(info.track), "
+                line += "\(info.cars.count) car(s), TCP \(info.tcpPort)"
+                if let clients = info.clients { line += ", \(clients) of \(info.capacity ?? 0) drivers" }
+                Self.log(line)
                 session = AssettoCorsa.online(chosen, info: info, address: address, ip: ip, content: content, driverName: driver,
                                               steamID: account?.steamID, skins: skins)
             } catch {
                 Self.log("server \(address.text): \(error)")
-                tell("Can't reach the server", "\(address.text) did not give its information: \(AssettoCorsaServer.describe(error)) "
-                     + "Check the address and its HTTP port, or clear Server in Game options to practise.")
+                let why: String = AssettoCorsaServer.describe(error)
+                let note: String = address.text + " did not give its information: " + why
+                    + " Check the address and its HTTP port, or clear Server in Game options to practise."
+                tell("Can't reach the server", note)
                 return refused
             }
         }
@@ -206,15 +218,17 @@ final class AssettoCorsaStore: ObservableObject {
         }.value
         switch written {
         case let .success(names):
-            Self.log("\(s.summary); wrote \(names.joined(separator: ", ")) (screen \(size.0)x\(size.1) at \(refresh) Hz)"
-                     + (s.online.map { $0.guid.isEmpty ? "; no SteamID for GUID" : "; GUID is the paired account's" } ?? ""))
+            var line: String = "\(s.summary); wrote \(names.joined(separator: ", ")) (screen \(size.0)x\(size.1) at \(refresh) Hz)"
+            if let o = s.online { line += o.guid.isEmpty ? "; no SteamID for GUID" : "; GUID is the paired account's" }
+            Self.log(line)
         case let .failure(e):
             Self.log("race.ini not written: \(e)")
             tell("Can't start \(t.name)", "Playport couldn't write the game's race.ini: \(e)")
             return refused
         }
-        let note = s.online.map { o in "Joining \(o.name.isEmpty ? "\(o.ip):\(o.tcpPort)" : o.name) with \(s.car)." }
-        return (true, note)
+        guard let o = s.online else { return (true, nil) }
+        let server: String = o.name.isEmpty ? "\(o.ip):\(o.tcpPort)" : o.name
+        return (true, "Joining " + server + " with " + s.car + ".")
     }
 }
 
@@ -310,6 +324,12 @@ enum AssettoCorsaServer {
 
 // MARK: Game options › Assetto Corsa
 
+extension InstalledTitle {
+    /// Assetto Corsa's copy (Steam app 244210), whose page and Play have their own part here.
+    var isAssettoCorsa: Bool { appID == AssettoCorsa.appID }
+}
+
+/// The rows, each its own small view: the type checker sees one row at a time.
 struct AssettoCorsaOptionRows: View {
     let title: InstalledTitle
     /// The game's name, the pickers' context.
@@ -319,70 +339,129 @@ struct AssettoCorsaOptionRows: View {
     @State private var content = AssettoCorsa.Content(cars: [], tracks: [])
 
     var body: some View {
-        let o = store.options
-        let server = o.server.trimmingCharacters(in: .whitespaces)
         VStack(spacing: 2) {
             PadSectionHeader(text: "Assetto Corsa").id("assetto")
-            if let entry = LaunchSettingsStore.compat.entry(for: title.id) {
-                PadRow(id: "opt:acHow", title: "\(OptionValue.compatMarker) How Play starts this game", subtitle: entry.reason,
-                       subtitleLines: nil, style: .plain, hint: "Info") {}
-            }
-            PadRow(id: "opt:acServer", title: "Server",
-                   subtitle: server.isEmpty ? "None: Play starts a practice session" : "Play joins it, as your Steam account",
-                   value: server.isEmpty ? "None" : server, accessory: .chevron, changed: !server.isEmpty, style: .plain,
-                   hint: "Edit", reset: server.isEmpty ? nil : { store.options.server = "" }) {
-                PadModal.shared.keyboard(title: "Server", text: o.server, placeholder: "Address:HTTP port, or a join link",
-                                         maxLength: 300) { store.options.server = $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            }
-            PadRow(id: "opt:acPassword", title: "Server password", value: o.password.isEmpty ? "None" : "Set", accessory: .chevron,
-                   changed: !o.password.isEmpty, style: .plain, hint: "Edit",
-                   reset: o.password.isEmpty ? nil : { store.options.password = "" }) {
-                PadModal.shared.keyboard(title: "Server password", text: o.password, placeholder: "Password", maxLength: 64,
-                                         privacy: .hidden) { store.options.password = $0 }
-            }
-            PadRow(id: "opt:acDriver", title: "Driver name", value: o.driverName.isEmpty ? "Your Steam name" : o.driverName,
-                   accessory: .chevron, changed: !o.driverName.isEmpty, style: .plain, hint: "Edit",
-                   reset: o.driverName.isEmpty ? nil : { store.options.driverName = "" }) {
-                PadModal.shared.keyboard(title: "Driver name", text: o.driverName, placeholder: "Your Steam name", maxLength: 32) {
-                    store.options.driverName = $0.trimmingCharacters(in: .whitespaces)
-                }
-            }
-            PadRow(id: "opt:acCar", title: "Car",
-                   subtitle: server.isEmpty ? nil : "On a server, when it allows this car; else the first of its cars here",
-                   value: o.car.isEmpty ? "First installed" : o.car, accessory: .chevron, changed: !o.car.isEmpty, style: .plain,
-                   reset: o.car.isEmpty ? nil : { store.options.car = "" }) {
-                PadModal.shared.picker(
-                    title: "Car", context: "\(context) · Assetto Corsa", note: "\(content.cars.count) cars in content\\cars.",
-                    options: [PadOption(id: "", label: "Default", detail: content.cars.first.map { "\($0), the first" })]
-                        + content.cars.map { PadOption(id: $0, label: $0) },
-                    selected: o.car) { store.options.car = $0 }
-            }
-            PadRow(id: "opt:acTrack", title: "Practice track", subtitle: "A server chooses its own",
-                   value: o.track.isEmpty ? "First installed" : o.track, accessory: .chevron, changed: !o.track.isEmpty,
-                   style: .plain, reset: o.track.isEmpty ? nil : { store.options.track = "" }) {
-                let choices = content.trackChoices
-                PadModal.shared.picker(
-                    title: "Practice track", context: "\(context) · Assetto Corsa",
-                    note: "\(content.tracks.count) tracks in content\\tracks; a layout is track/layout.",
-                    options: [PadOption(id: "", label: "Default", detail: choices.first.map { "\($0), the first" })]
-                        + choices.map { PadOption(id: $0, label: $0) },
-                    selected: o.track) { store.options.track = $0 }
-            }
-            PadRow(id: "opt:acMods", title: "Install mods",
-                   subtitle: "A .zip or folder from Files: Custom Shaders Patch, cars, tracks, a server's content pack",
-                   value: installValue, accessory: .chevron, style: .plain, hint: "Pick") {
-                guard store.installing == nil, !launch.running else { return }
-                AssettoCorsaStore.pickRequests.send()
-            }
+            howRow
+            serverRow
+            passwordRow
+            driverRow
+            carRow
+            trackRow
+            modsRow
         }
-        .task(id: store.installs) {
-            let root = LibraryModel.paths.games.appendingPathComponent(title.installDir, isDirectory: true)
-            content = await Task.detached(priority: .userInitiated) { AssettoCorsa.content(root: root) }.value
+        .task(id: store.installs) { await list() }
+    }
+
+    private func list() async {
+        let root: URL = LibraryModel.paths.games.appendingPathComponent(title.installDir, isDirectory: true)
+        let found: AssettoCorsa.Content = await Task.detached(priority: .userInitiated) { AssettoCorsa.content(root: root) }.value
+        content = found
+    }
+
+    @ViewBuilder private var howRow: some View {
+        if let entry = LaunchSettingsStore.compat.entry(for: title.id) {
+            let heading: String = OptionValue.compatMarker + " How Play starts this game"
+            PadRow(id: "opt:acHow", title: heading, subtitle: entry.reason, subtitleLines: nil, style: .plain, hint: "Info",
+                   action: {})
         }
     }
 
+    private var serverRow: some View {
+        let server: String = store.options.server
+        let value: String = server.isEmpty ? "None" : server
+        let subtitle: String = server.isEmpty ? "None: Play starts a practice session" : "Play joins it, as your Steam account"
+        let reset: (() -> Void)? = server.isEmpty ? nil : { store.options.server = "" }
+        return PadRow(id: "opt:acServer", title: "Server", subtitle: subtitle, value: value, accessory: .chevron,
+                      changed: !server.isEmpty, style: .plain, hint: "Edit", reset: reset, action: { editServer() })
+    }
+
+    private func editServer() {
+        let done: (String) -> Void = { text in store.options.server = text.trimmingCharacters(in: .whitespacesAndNewlines) }
+        PadModal.shared.keyboard(title: "Server", text: store.options.server, placeholder: "Address:HTTP port, or a join link",
+                                 maxLength: 300, done: done)
+    }
+
+    private var passwordRow: some View {
+        let set: Bool = !store.options.password.isEmpty
+        let reset: (() -> Void)? = set ? { store.options.password = "" } : nil
+        return PadRow(id: "opt:acPassword", title: "Server password", value: set ? "Set" : "None", accessory: .chevron,
+                      changed: set, style: .plain, hint: "Edit", reset: reset, action: { editPassword() })
+    }
+
+    private func editPassword() {
+        let done: (String) -> Void = { text in store.options.password = text }
+        PadModal.shared.keyboard(title: "Server password", text: store.options.password, placeholder: "Password", maxLength: 64,
+                                 privacy: .hidden, done: done)
+    }
+
+    private var driverRow: some View {
+        let name: String = store.options.driverName
+        let reset: (() -> Void)? = name.isEmpty ? nil : { store.options.driverName = "" }
+        return PadRow(id: "opt:acDriver", title: "Driver name", value: name.isEmpty ? "Your Steam name" : name,
+                      accessory: .chevron, changed: !name.isEmpty, style: .plain, hint: "Edit", reset: reset,
+                      action: { editDriver() })
+    }
+
+    private func editDriver() {
+        let done: (String) -> Void = { text in store.options.driverName = text.trimmingCharacters(in: .whitespaces) }
+        PadModal.shared.keyboard(title: "Driver name", text: store.options.driverName, placeholder: "Your Steam name",
+                                 maxLength: 32, done: done)
+    }
+
+    private var carRow: some View {
+        let car: String = store.options.car
+        let online: Bool = !store.options.server.trimmingCharacters(in: .whitespaces).isEmpty
+        let subtitle: String? = online ? "On a server when it allows this car, else the first of its cars here" : nil
+        let reset: (() -> Void)? = car.isEmpty ? nil : { store.options.car = "" }
+        return PadRow(id: "opt:acCar", title: "Car", subtitle: subtitle, value: car.isEmpty ? "First installed" : car,
+                      accessory: .chevron, changed: !car.isEmpty, style: .plain, reset: reset, action: { pickCar() })
+    }
+
+    private func pickCar() {
+        let choose: (String) -> Void = { id in store.options.car = id }
+        let note: String = String(content.cars.count) + " cars in content\\cars."
+        PadModal.shared.picker(title: "Car", context: context + " · Assetto Corsa", note: note,
+                               options: Self.options(content.cars), selected: store.options.car, choose: choose)
+    }
+
+    private var trackRow: some View {
+        let track: String = store.options.track
+        let reset: (() -> Void)? = track.isEmpty ? nil : { store.options.track = "" }
+        return PadRow(id: "opt:acTrack", title: "Practice track", subtitle: "A server chooses its own",
+                      value: track.isEmpty ? "First installed" : track, accessory: .chevron, changed: !track.isEmpty,
+                      style: .plain, reset: reset, action: { pickTrack() })
+    }
+
+    private func pickTrack() {
+        let choose: (String) -> Void = { id in store.options.track = id }
+        let note: String = String(content.tracks.count) + " tracks in content\\tracks; a layout is track/layout."
+        PadModal.shared.picker(title: "Practice track", context: context + " · Assetto Corsa", note: note,
+                               options: Self.options(content.trackChoices), selected: store.options.track, choose: choose)
+    }
+
+    /// Default (the first), then each choice.
+    private static func options(_ choices: [String]) -> [PadOption] {
+        var detail: String?
+        if let first = choices.first { detail = first + ", the first" }
+        var out: [PadOption] = [PadOption(id: "", label: "Default", detail: detail)]
+        for c in choices { out.append(PadOption(id: c, label: c)) }
+        return out
+    }
+
+    private var modsRow: some View {
+        PadRow(id: "opt:acMods", title: "Install mods",
+               subtitle: "A .zip or folder from Files: Custom Shaders Patch, cars, tracks, a server's content pack",
+               value: installValue, accessory: .chevron, style: .plain, hint: "Pick", action: { pickMods() })
+    }
+
+    private func pickMods() {
+        guard store.installing == nil, !launch.running else { return }
+        AssettoCorsaStore.pickRequests.send()
+    }
+
     private var installValue: String {
-        if let i = store.installing { return "Installing… \(Int(i.fraction * 100))%" }
-        return store.lastInstall ?? "\(content.cars.count) cars, \(content.tracks.count) tracks"
+        if let i = store.installing { return "Installing… " + String(Int(i.fraction * 100)) + "%" }
+        if let last = store.lastInstall { return last }
+        return String(content.cars.count) + " cars, " + String(content.tracks.count) + " tracks"
     }
 }

@@ -288,7 +288,7 @@ final class LibraryModel: ObservableObject {
         // Assetto Corsa: acs.exe reads what to drive from race.ini, which Game options' choices write, a
         // server's /INFO first (UI/AssettoCorsaPage.swift); one that can't be had says why and starts nothing.
         var assettoCorsaNote: String?
-        if let t = catalog.title(id: id), t.appID == AssettoCorsa.appID {
+        if let t = catalog.title(id: id), t.isAssettoCorsa {
             if preparing[id] != nil { return false }
             preparing[id] = AssettoCorsaStore.shared.options.server.isEmpty ? "Preparing the session…" : "Asking the server…"
             let prepared = await AssettoCorsaStore.shared.prepareForPlay(

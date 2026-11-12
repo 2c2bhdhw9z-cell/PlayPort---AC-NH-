@@ -841,7 +841,7 @@ private struct GameDetailPage: View {
                         graphicsRows(t)
                         GameControlsOptionRows(titleID: t.id, context: context)
                         // Assetto Corsa's server, car, track and mods (UI/AssettoCorsaPage.swift).
-                        if t.appID == AssettoCorsa.appID { AssettoCorsaOptionRows(title: t, context: context) }
+                        if t.isAssettoCorsa { AssettoCorsaOptionRows(title: t, context: context) }
                         gameRows(t, g)
                         #if !PLAYPORT_RELEASE
                         developerRows(t)
@@ -1549,7 +1549,7 @@ enum ProblemReport {
         urls += ((try? fm.contentsOfDirectory(at: driveC, includingPropertiesForKeys: nil)) ?? [])
             .filter { $0.pathExtension.lowercased() == "log" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
-        if t?.appID == AssettoCorsa.appID { urls += AssettoCorsaStore.reportFiles() }
+        if let t, t.isAssettoCorsa { urls += AssettoCorsaStore.reportFiles() }
         // One of each name: the zip holds them side by side.
         var names = Set<String>()
         return urls.filter { fm.fileExists(atPath: $0.path) && names.insert($0.lastPathComponent).inserted }
