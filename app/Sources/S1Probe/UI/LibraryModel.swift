@@ -162,11 +162,14 @@ final class LibraryModel: ObservableObject {
         guard !scanning else { rescan = true; return }
         scanning = true
         let previous = catalog
+        // The compatibility defaults' executables (Assetto Corsa's acs.exe in place of its launcher).
+        let compatExecutables = LaunchSettingsStore.compat.executables
         Task.detached(priority: .userInitiated) {
             let paths = LibraryModel.paths
             let scanned = Adoption.scan(games: paths.games, cohort: LibraryModel.cohort,
                                         receipts: Adoption.receipts(in: paths.layout.installsDir),
-                                        storeReceipts: paths.layout.storeReceipts(), previous: previous)
+                                        storeReceipts: paths.layout.storeReceipts(), previous: previous,
+                                        compatExecutables: compatExecutables)
             await LibraryModel.shared.adopted(scanned)
         }
     }
@@ -282,6 +285,18 @@ final class LibraryModel: ObservableObject {
                 return false
             }
         }
+        // Assetto Corsa: acs.exe reads what to drive from race.ini, which Game options' choices write, a
+        // server's /INFO first (UI/AssettoCorsaPage.swift); one that can't be had says why and starts nothing.
+        var assettoCorsaNote: String?
+        if let t = catalog.title(id: id), t.appID == AssettoCorsa.appID {
+            if preparing[id] != nil { return false }
+            preparing[id] = AssettoCorsaStore.shared.options.server.isEmpty ? "Preparing the session…" : "Asking the server…"
+            let prepared = await AssettoCorsaStore.shared.prepareForPlay(
+                t, screen: LaunchSettingsStore.shared.effective(for: t).guestScreen, steam: SteamAccountModel.current?.service)
+            preparing[id] = nil
+            guard prepared.ready else { return false }
+            assettoCorsaNote = prepared.note
+        }
         // The first-run checks, by themselves: a missing pairing file (iOS 26) opens the checklist
         // with the fix; a missing pairing (iOS 27) or LocalDevVPN down JitSetup fixes (UI/SetupView.swift).
         guard SetupState.shared.beforePlay(steamGame: catalog.title(id: id)?.appID != nil) else { return false }
@@ -291,6 +306,8 @@ final class LibraryModel: ObservableObject {
             Self.log("play \(id): \(report)")
             SetupState.shared.addLaunchNote(report)
         }
+        // The server Assetto Corsa joins, and with which car.
+        if let assettoCorsaNote { SetupState.shared.addLaunchNote(assettoCorsaNote) }
         // Setup may outlive navigation or a catalogue refresh: validate again
         // and build the launch from current settings only after sheet dismissal.
         guard let t = catalog.title(id: id), t.canPlay, !verifying.contains(id), !removing.contains(id),

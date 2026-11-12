@@ -1,10 +1,26 @@
 > [!NOTE]
 > **This repository is a fork of [Playport](https://github.com/playportdev/playport) for
-> Assetto Corsa and No Hesi.** Work in progress. The `assetto-corsa` branch builds
-> Playport's IPA on GitHub Actions ([`build-ipa`](.github/workflows/build-ipa.yml)):
-> a macOS job packages Apple's SDK from the runner's Xcode, and Linux jobs build the
-> rest. Assetto Corsa support (starting `acs.exe` without the Kunos launcher, loading
-> Custom Shaders Patch) comes next. Playport's own README follows, unchanged.
+> Assetto Corsa and No Hesi.** Work in progress, not yet played on a phone. The
+> `assetto-corsa` branch builds Playport's IPA on GitHub Actions
+> ([`build-ipa`](.github/workflows/build-ipa.yml)): a macOS job packages Apple's SDK from
+> the runner's Xcode, and Linux jobs build the rest.
+>
+> What it adds for Assetto Corsa (Steam app 244210):
+>
+> - **Play starts `acs.exe`**, not the Kunos launcher, which does not run here. Before each
+>   Play the app writes `Documents\Assetto Corsa\cfg\race.ini`: a practice session, or the
+>   server set in Game options › Assetto Corsa, whose `/INFO` names its track, cars and port.
+>   A first start also gets a video.ini at the phone's screen size, an Xbox-pad controls.ini
+>   and an assists.ini.
+> - **Install mods** (same panel): a `.zip` or folder from Files is unpacked into the game's
+>   folder: Custom Shaders Patch (`dwrite.dll`, `extension\`), cars, tracks, content packs.
+> - **Report a problem** on the game's page also shares the game's `log.txt`, Custom Shaders
+>   Patch's log and the last race.ini.
+>
+> The code is [`AssettoCorsa.swift`](app/PlayportKit/Sources/PlayportKit/AssettoCorsa.swift),
+> [`AssettoCorsaMods.swift`](app/PlayportKit/Sources/PlayportKit/AssettoCorsaMods.swift) and
+> [`AssettoCorsaPage.swift`](app/Sources/S1Probe/UI/AssettoCorsaPage.swift). Playport's own
+> README follows, unchanged.
 
 <div align="center">
 

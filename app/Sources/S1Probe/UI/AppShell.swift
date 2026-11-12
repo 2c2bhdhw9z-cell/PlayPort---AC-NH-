@@ -45,6 +45,14 @@ struct AppShell: View {
     @State private var importing = false
     /// What the one Files picker is open for: a pairing file, or a game (UI/Import.swift).
     @State private var importingGame = false
+    /// Or Assetto Corsa's mods (UI/AssettoCorsaPage.swift), over the other two.
+    @State private var importingMods = false
+
+    /// What the Files picker offers for what it is open for.
+    private var importTypes: [UTType] {
+        if importingMods { return AssettoCorsaStore.contentTypes }
+        return importingGame ? GameImports.contentTypes : [.propertyList, .xml, .data]
+    }
     @ObservedObject private var gog = GOGAccount.shared
     @ObservedObject private var epic = EpicAccount.shared
     @ObservedObject private var layoutEditor = LayoutEditorSession.shared
@@ -110,12 +118,15 @@ struct AppShell: View {
         }
         .padFocusRoot()
         .onReceive(PadRouter.shared.presses) { press($0) }
-        // Choosing a pairing file (the checklist's step on iOS 26, Setup check's import), or a
-        // game to import (Library › Add a game): touch only, as Files is. One picker for both:
-        // SwiftUI presents only one fileImporter per hierarchy reliably.
-        .fileImporter(isPresented: $importing,
-                      allowedContentTypes: importingGame ? GameImports.contentTypes : [.propertyList, .xml, .data]) { result in
-            if importingGame {
+        // Choosing a pairing file (the checklist's step on iOS 26, Setup check's import), a
+        // game to import (Library › Add a game), or Assetto Corsa's mods (its Game options' Install
+        // mods): touch only, as Files is. One picker for all: SwiftUI presents only one
+        // fileImporter per hierarchy reliably.
+        .fileImporter(isPresented: $importing, allowedContentTypes: importTypes) { result in
+            if importingMods {
+                guard case let .success(url) = result else { return }
+                Task { await AssettoCorsaStore.shared.picked(url) }
+            } else if importingGame {
                 guard case let .success(url) = result else { return }
                 Task {
                     if let refusal = await GameImports.shared.picked(url) {
@@ -129,6 +140,12 @@ struct AppShell: View {
         }
         .onReceive(SettingsImport.requests) {
             importingGame = false
+            importingMods = false
+            importing = true
+        }
+        .onReceive(AssettoCorsaStore.pickRequests) {
+            importingGame = false
+            importingMods = true
             importing = true
         }
         // GOG's and Epic's sign-in pages (touch: a web page, as iOS draws it; decision 0058).
@@ -136,6 +153,7 @@ struct AppShell: View {
         .sheet(isPresented: $epic.signingIn) { EpicSignInSheet() }
         .onReceive(GameImports.requests) {
             importingGame = true
+            importingMods = false
             importing = true
         }
         .environmentObject(model)

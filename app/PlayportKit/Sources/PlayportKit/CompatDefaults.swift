@@ -4,12 +4,14 @@
 //
 //   {"titles": {"epic-Buffalo": {"settings": {"aspect": "16:9"},
 //                                "reason": "This game draws nothing on a screen wider than 16:9."},
-//               "app-15100": {"controls": "keyboardMouse", "reason": "..."}}}
+//               "app-15100": {"controls": "keyboardMouse", "reason": "..."},
+//               "app-244210": {"executable": "acs.exe", "reason": "..."}}}
 //
 // keyed by catalogue id (case-sensitive: Epic app names have capitals), each entry a
 // LaunchSettings object in the --settings JSON form, the game's starting on-screen layout
-// (`controls`, an OnScreenLayout; ControlsState.resolve), or both, and a short player-facing
-// reason. The
+// (`controls`, an OnScreenLayout; ControlsState.resolve), the executable Play starts in place
+// of the store's launch entry (`executable`, a path under the game's folder; Adoption.scan), or
+// any of them together, and a short player-facing reason. The
 // file reaches players: it names no issue, run or build; where an entry comes from is in
 // the decision and evidence records. Precedence for one launch setting: the person's own
 // choice on the game's page, then the title's compatibility default, then Settings, then
@@ -17,6 +19,7 @@
 // Runtime keys and Graphics options take that precedence per key (decision 0091).
 
 import Foundation
+import SteamClientKit   // WindowsName (ContentKit)
 
 public struct CompatDefaults: Equatable, Sendable {
     public struct Entry: Equatable, Sendable {
@@ -26,6 +29,10 @@ public struct CompatDefaults: Equatable, Sendable {
         public let controls: OnScreenLayout?
         /// Shown on the game's page, after "Set for this game's compatibility".
         public let reason: String
+        /// The executable Play starts, relative to the game's folder (`\` or `/` between folders),
+        /// in place of the store's launch entry: a Steam receipt's, which then passes no arguments
+        /// (Adoption.scan). Nil: the store's.
+        public var executable: String? = nil
     }
 
     public let entries: [String: Entry]
@@ -37,14 +44,18 @@ public struct CompatDefaults: Equatable, Sendable {
 
     public func entry(for id: String) -> Entry? { entries[id] }
 
+    /// Each entry's `executable`, by catalogue id: what Adoption.scan starts in place of a receipt's.
+    public var executables: [String: String] { entries.compactMapValues(\.executable) }
+
     /// Reads `<directory>/compat-defaults.json`.
     public static func load(directory: URL) throws -> CompatDefaults {
         try parse(Data(contentsOf: directory.appendingPathComponent(fileName)))
     }
 
     /// The table, checked: only `titles`; ids as the catalogue writes them; only `settings`,
-    /// `controls` and `reason` in an entry, with `settings` or `controls`; `controls` a layout's
-    /// name; each setting a LaunchSettings key whose value reads back as
+    /// `controls`, `executable` and `reason` in an entry, with `settings`, `controls` or
+    /// `executable`; `controls` a layout's name; `executable` a relative path to a `.exe`
+    /// (validExecutable); each setting a LaunchSettings key whose value reads back as
     /// written and a launch takes; a reason with no project-internal reference.
     public static func parse(_ data: Data) throws -> CompatDefaults {
         guard let top = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -58,7 +69,7 @@ public struct CompatDefaults: Equatable, Sendable {
                 throw CompatDefaultsError.badTitle(id)
             }
             guard let entry = value as? [String: Any] else { throw CompatDefaultsError.notAnObject(id) }
-            if let k = entry.keys.first(where: { !["settings", "controls", "reason"].contains($0) }) {
+            if let k = entry.keys.first(where: { !["settings", "controls", "executable", "reason"].contains($0) }) {
                 throw CompatDefaultsError.unknownKey("\(id).\(k)")
             }
             guard let reason = (entry["reason"] as? String)?.trimmingCharacters(in: .whitespaces), !reason.isEmpty else {
@@ -72,13 +83,29 @@ public struct CompatDefaults: Equatable, Sendable {
                 }
                 controls = layout
             }
+            var executable: String?
+            if let value = entry["executable"] {
+                guard let path = value as? String, validExecutable(path) else { throw CompatDefaultsError.badSetting("\(id).executable") }
+                executable = path
+            }
             let raw = entry["settings"] as? [String: Any]
-            guard raw.map({ !$0.isEmpty }) ?? (controls != nil && entry["settings"] == nil) else {
+            guard raw.map({ !$0.isEmpty }) ?? ((controls != nil || executable != nil) && entry["settings"] == nil) else {
                 throw CompatDefaultsError.notAnObject("\(id).settings")
             }
-            entries[id] = Entry(settings: try raw.map { try settings($0, id: id) } ?? LaunchSettings(), controls: controls, reason: reason)
+            entries[id] = Entry(settings: try raw.map { try settings($0, id: id) } ?? LaunchSettings(), controls: controls, reason: reason,
+                                executable: executable)
         }
         return CompatDefaults(entries: entries)
+    }
+
+    /// A path under a game's folder to a Windows executable: folders and the file joined by `\`
+    /// or `/`, none empty, `.`, `..` or a drive (`C:`), each a name Windows can hold, the last
+    /// ending in `.exe`.
+    public static func validExecutable(_ path: String) -> Bool {
+        let parts = path.split(separator: "\\", omittingEmptySubsequences: false)
+            .flatMap { $0.split(separator: "/", omittingEmptySubsequences: false) }.map(String.init)
+        guard let last = parts.last, last.lowercased().hasSuffix(".exe"), last.count > 4 else { return false }
+        return parts.allSatisfy { (try? WindowsName.check($0)) != nil }
     }
 
     /// An issue id (`PLA-108`) or the tracker's address: what a shipped string must not hold.

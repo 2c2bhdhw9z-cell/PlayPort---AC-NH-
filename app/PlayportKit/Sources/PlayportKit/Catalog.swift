@@ -235,9 +235,11 @@ public struct CatalogStore: Sendable {
 public enum Adoption {
     /// The catalogue for what is in `games` now, keeping what `previous` knew.
     /// `receipts` are Steam's install records and `storeReceipts` every other
-    /// store's and the imports' (InstallLayout.installsDir).
+    /// store's and the imports' (InstallLayout.installsDir). `compatExecutables` are the
+    /// compatibility defaults' (CompatDefaults.executables, by title id): a Steam app
+    /// starts that one when it is in its folder, in place of its receipt's.
     public static func scan(games: URL, cohort: Cohort, receipts: [InstallReceipt], storeReceipts: [StoreReceipt] = [],
-                            previous: Catalog, now: Date = Date()) -> Catalog {
+                            previous: Catalog, compatExecutables: [String: String] = [:], now: Date = Date()) -> Catalog {
         let fm = FileManager.default
         let folders = ((try? fm.contentsOfDirectory(atPath: games.path)) ?? [])
             .filter { !$0.hasPrefix(".") && isDirectory(games.appendingPathComponent($0)) }
@@ -257,9 +259,12 @@ public enum Adoption {
             // are one title each.
             let steam = receipts.filter { $0.installDir.lowercased() == folder.lowercased() }
             for r in steam {
-                let launch = r.executable.flatMap { isPrelauncher($0) ? nil : locate($0, in: dir) }
+                // The compatibility default's executable (Assetto Corsa's acs.exe, where Steam starts
+                // a launcher that does not run here) takes the receipt's place when it is there.
+                let pinned: String? = compatExecutables["app-\(r.appID)"].flatMap { locate($0, in: dir) }
+                let launch: String? = pinned != nil ? nil : r.executable.flatMap { isPrelauncher($0) ? nil : locate($0, in: dir) }
                 var t = InstalledTitle(id: "app-\(r.appID)", appID: r.appID, name: r.name, developer: nil, installDir: folder,
-                                       executable: launch ?? pick(exes, folder: folder, in: dir),
+                                       executable: pinned ?? launch ?? pick(exes, folder: folder, in: dir),
                                        buildID: r.buildID,
                                        depots: r.depots.map { .init(depotID: $0.depotID, manifestGID: String($0.gid)) },
                                        sizeBytes: r.bytes, source: .installed, checksums: nil, note: nil, addedAt: now,

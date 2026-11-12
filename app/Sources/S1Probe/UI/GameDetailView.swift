@@ -840,6 +840,8 @@ private struct GameDetailPage: View {
                     VStack(spacing: 2) {
                         graphicsRows(t)
                         GameControlsOptionRows(titleID: t.id, context: context)
+                        // Assetto Corsa's server, car, track and mods (UI/AssettoCorsaPage.swift).
+                        if t.appID == AssettoCorsa.appID { AssettoCorsaOptionRows(title: t, context: context) }
                         gameRows(t, g)
                         #if !PLAYPORT_RELEASE
                         developerRows(t)
@@ -1535,7 +1537,9 @@ private struct SecondaryButton: View {
 /// logs a game left on drive C, for the player to send where they like.
 @MainActor
 enum ProblemReport {
-    static func files() -> [URL] {
+    /// For Assetto Corsa also its own log, Custom Shaders Patch's and the race.ini Play wrote
+    /// (AssettoCorsaStore.reportFiles).
+    static func files(for t: InstalledTitle? = nil) -> [URL] {
         let fm = FileManager.default
         var urls = [AppLog.url]
         #if PLAYPORT_RELEASE
@@ -1545,11 +1549,14 @@ enum ProblemReport {
         urls += ((try? fm.contentsOfDirectory(at: driveC, includingPropertiesForKeys: nil)) ?? [])
             .filter { $0.pathExtension.lowercased() == "log" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
-        return urls.filter { fm.fileExists(atPath: $0.path) }
+        if t?.appID == AssettoCorsa.appID { urls += AssettoCorsaStore.reportFiles() }
+        // One of each name: the zip holds them side by side.
+        var names = Set<String>()
+        return urls.filter { fm.fileExists(atPath: $0.path) && names.insert($0.lastPathComponent).inserted }
     }
 
     static func share(_ t: InstalledTitle) {
-        let urls = files()
+        let urls = files(for: t)
         Task { @MainActor in
             let zip = await archive(urls, name: t.id)
             LibraryModel.log("report a problem for \(t.id): sharing \(urls.map(\.lastPathComponent).joined(separator: ", "))"
