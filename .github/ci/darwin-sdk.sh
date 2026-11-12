@@ -31,6 +31,9 @@ curl -fsSL -o "$work/xtool.app.zip" "https://github.com/xtool-org/xtool/releases
 echo "$XTOOL_ZIP_SHA256  $work/xtool.app.zip" | shasum -a 256 -c -
 ditto -x -k "$work/xtool.app.zip" "$work"
 xtool=$work/xtool.app/Contents/MacOS/xtool
+# Without XTL_CLI=1 the app's executable starts its UI, which waits forever on a
+# runner. The app's own CLI wrapper (Contents/Resources/bin/xtool) sets it.
+export XTL_CLI=1
 "$xtool" --version
 
 "$xtool" sdk build "$XCODE" "$work/out" --arch x86_64
