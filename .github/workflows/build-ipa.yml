@@ -158,6 +158,33 @@ jobs:
         run: gh cache delete "$KEY" --repo "$GITHUB_REPOSITORY" || true
       - name: Install the Darwin SDK
         run: .github/ci/install-sdk.sh sdk-cache/darwin.xtoolsdk.tar.zst
+      # The native stages (Wine, FEX, DXMT, Mesa, DXVK, vkd3d-proton, the Steam API, idevice) as
+      # the app stage reads them, kept from the last run that built them from these inputs with
+      # these compilers (.github/ci/staged.sh): a run that changes only the app builds the app alone.
+      # The key is taken before the restore, which changes build records the key hashes.
+      - id: stagedkey
+        name: The native stages' key
+        env:
+          INPUTS: ${{ hashFiles('pins.lock', 'patches/**', 'build/**', 'app/registry/**', 'app/artifacts.tsv', 'app/tools/**', 'app/SessionRoot/**', 'app/UrlOpener/**', 'app/SteamClientShim/**', 'app/Sources/WineHost/include/**', 'LICENSE', 'LICENSE-EXCEPTION.md', 'app/SteamClient/LICENSE-JavaSteam.txt', '.github/ci/*.sh') }}
+        run: |
+          tools=$({ clang --version | head -1; "$LLVM_MINGW/bin/clang" --version | head -1
+                    ls "$DARWIN_SDK"/Developer/Platforms/*.platform/Developer/SDKs; } | sha256sum | cut -c1-16)
+          echo "key=pp-staged-v1-${INPUTS:0:32}-$tools" >> "$GITHUB_OUTPUT"
+      - id: staged
+        name: Restore the native stages
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.stagedkey.outputs.key }}
+          path: |
+            /mnt/pp/run/stamps
+            /mnt/pp/run/dxmt-patched/pe
+            /mnt/pp/staged-records
+            app/Staged
+            app/Sources/S1Probe/Runtime
+            app/Sources/WinIOS
+      - name: Put back the native stages' build records
+        if: steps.staged.outputs.cache-hit == 'true'
+        run: .github/ci/staged.sh restore
       - name: Restore the build cache (LLVM 15 builds, source mirrors)
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -167,12 +194,6 @@ jobs:
       - name: pp build --variant release --unsigned
         # Stops short of the job's limit so that the cache below is still saved.
         run: timeout --kill-after=2m 320m ./pp build --variant release --unsigned
-      - name: Save the build cache
-        if: always()
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          key: pp-cache-v1-${{ hashFiles('pins.lock') }}-${{ github.run_id }}
-          path: /mnt/pp/cache
       - name: Upload the IPA
         if: success()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -185,6 +206,31 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
+      - name: Save the build cache
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: pp-cache-v1-${{ hashFiles('pins.lock') }}-${{ github.run_id }}
+          path: /mnt/pp/cache
+      # Also when the app or verify stage failed: the native stages are what took the hours.
+      - id: keep
+        name: Keep the native stages
+        if: always() && steps.stagedkey.outputs.key != '' && steps.staged.outputs.cache-hit != 'true'
+        continue-on-error: true
+        run: .github/ci/staged.sh keep
+      - name: Save the native stages
+        if: always() && steps.keep.outputs.complete == 'true'
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.stagedkey.outputs.key }}
+          path: |
+            /mnt/pp/run/stamps
+            /mnt/pp/run/dxmt-patched/pe
+            /mnt/pp/staged-records
+            app/Staged
+            app/Sources/S1Probe/Runtime
+            app/Sources/WinIOS
       - name: Upload the stage logs
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
