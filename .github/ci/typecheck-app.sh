@@ -29,5 +29,9 @@ for f in Winios/Winios.h Winios/WiniosGamepad.h IOSDisplayShim.h; do
     curl -fsSL --retry 3 -o "$win/include/${f##*/}" "$raw/$f"
 done
 cp .github/ci/typecheck/Package.swift app/Package.swift
+# An expression the type checker takes long over is named (over 3 s) and, past 120 s, refused
+# with its place, rather than holding the step for the job's hours.
 swift build --package-path app --configuration debug --build-system native --swift-sdk arm64-apple-ios \
-    --scratch-path "${RUNNER_TEMP:-/tmp}/typecheck-app" --target Playport
+    --scratch-path "${RUNNER_TEMP:-/tmp}/typecheck-app" --target Playport \
+    -Xswiftc -Xfrontend -Xswiftc -warn-long-expression-type-checking=3000 \
+    -Xswiftc -Xfrontend -Xswiftc -solver-expression-time-threshold=120
